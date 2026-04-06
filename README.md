@@ -2,7 +2,7 @@
 
 **Autonomous SLO breach detection → diagnosis → Linear ticket → code patch**
 
-This demo showcases how an AI coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code)) can act as an autonomous SRE by connecting to production observability and project management tools via [MCP](https://modelcontextprotocol.io/) (Model Context Protocol). Given a single prompt — "Run the SLO workflow" — the agent:
+This demo showcases how an AI coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code)) connects to observability and project management tools via [MCP](https://modelcontextprotocol.io/) (Model Context Protocol). Given a single prompt — "Run the SLO workflow" — the agent:
 
 - Queries live cluster metrics from [Groundcover](https://groundcover.com) to detect SLO breaches
 - Pulls distributed traces to diagnose the root cause
