@@ -2,7 +2,6 @@
 .env
 *.env
 !.env.example
-.claude/settings.json
 
 # Python
 __pycache__/

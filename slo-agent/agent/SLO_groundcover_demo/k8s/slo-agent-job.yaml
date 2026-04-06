@@ -1,0 +1,40 @@
+# Run the remediation agent as a one-shot Job in the same namespace as order-service
+# so Groundcover (and your cluster log stack) can capture pod logs like any other workload.
+#
+# Before apply:
+#   1. Build/push the image (same ECR account/repo pattern as buggy-service, e.g. slo-agent)
+#   2. Create secret slo-agent-secrets (see README)
+#   3. Replace the image line below with your ECR URI
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: slo-agent-run
+  namespace: slo-demo
+  labels:
+    app: slo-agent
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: slo-agent
+    spec:
+      serviceAccountName: slo-agent
+      restartPolicy: Never
+      containers:
+        - name: agent
+          # Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/slo-agent:latest
+          image: SLO_AGENT_IMAGE
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: slo-agent-secrets
+          env:
+            - name: AWS_REGION
+              value: "us-east-2"
+            - name: TARGET_NAMESPACE
+              value: "slo-demo"
+            - name: SLO_THRESHOLD_MS
+              value: "500"
