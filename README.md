@@ -1,13 +1,15 @@
-# SLO Remediation Demo
+# SLO Remediation Demo with Groundcover
 
 **Autonomous SLO breach detection → diagnosis → Linear ticket → code patch**
 
-This demo showcases how an AI coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code)) connects to observability and project management tools via [MCP](https://modelcontextprotocol.io/) (Model Context Protocol). Given a single prompt — "Run the SLO workflow" — the agent:
+This demo shows how [Groundcover's](https://groundcover.com) eBPF-based observability platform powers an AI-driven SLO remediation workflow — from zero-instrumentation monitoring to autonomous incident response.
 
-- Queries live cluster metrics from [Groundcover](https://groundcover.com) to detect SLO breaches
-- Pulls distributed traces to diagnose the root cause
-- Files a detailed incident ticket in [Linear](https://linear.app) with evidence
-- Suggests a code fix based on the trace analysis
+You'll walk through:
+
+1. **Deploying a buggy microservice** to EKS with an intentional N+1 query pattern
+2. **Installing the Groundcover eBPF sensor** to get full observability (metrics, traces, logs) with no code changes or sidecars
+3. **Generating load** to trigger SLO breaches that Groundcover detects automatically
+4. **Running an AI agent** ([Claude Code](https://docs.anthropic.com/en/docs/claude-code)) that connects to Groundcover via [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) to autonomously detect breaches, diagnose root causes from distributed traces, file incident tickets in [Linear](https://linear.app), and suggest code fixes
 
 No custom agent code is needed — the workflow is defined entirely in a [`CLAUDE.md`](CLAUDE.md) file that Claude Code follows, using Groundcover and Linear MCP servers as its tools.
 
