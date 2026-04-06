@@ -2,20 +2,27 @@
 set -euo pipefail
 
 # =============================================================================
-# SLO Demo — Deploy Script
+# SLO Demo — Full Deploy Script
 # =============================================================================
+# Deploys everything needed for the SLO remediation demo:
+#   1. EKS cluster (if not exists)
+#   2. Storage class (gp2 as default — required by Groundcover)
+#   3. Groundcover eBPF sensor
+#   4. Buggy order-service
+#   5. Load generator
+#
 # Prerequisites:
 #   - AWS CLI configured with appropriate permissions
 #   - eksctl installed
 #   - kubectl configured
 #   - Docker installed
-#   - Groundcover account + API key
-#   - Linear API key
+#   - Groundcover account (sign up at https://groundcover.com)
+#   - A values.yaml with your Groundcover tenant endpoint (see README)
 # =============================================================================
 
 # --- Configuration -----------------------------------------------------------
 CLUSTER_NAME="${CLUSTER_NAME:-slo-demo-cluster}"
-REGION="${AWS_REGION:-us-east-1}"
+REGION="${AWS_REGION:-us-east-2}"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_REPO="order-service"
 IMAGE_TAG="latest"
@@ -28,29 +35,74 @@ echo "  Region:  ${REGION}"
 echo "  Image:   ${FULL_IMAGE}"
 echo "============================================"
 
-# --- Phase 2a: EKS Cluster --------------------------------------------------
+# --- Step 1: EKS Cluster -----------------------------------------------------
 echo ""
-echo "[1/6] Creating EKS cluster (if not exists)..."
+echo "[1/7] Creating EKS cluster (if not exists)..."
 if ! eksctl get cluster --name "${CLUSTER_NAME}" --region "${REGION}" 2>/dev/null; then
     eksctl create cluster \
         --name "${CLUSTER_NAME}" \
         --region "${REGION}" \
         --nodes 2 \
-        --node-type t3.medium \
+        --node-type t3.xlarge \
         --managed
     echo "  Cluster created."
 else
     echo "  Cluster already exists. Skipping."
 fi
 
-# --- Phase 2b: ECR + Docker Build -------------------------------------------
+# --- Step 2: Default storage class -------------------------------------------
 echo ""
-echo "[2/6] Creating ECR repository (if not exists)..."
+echo "[2/7] Setting default storage class..."
+# EKS doesn't set a default storage class — Groundcover requires one
+if kubectl get storageclass gp2 &>/dev/null; then
+    kubectl patch storageclass gp2 -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}' 2>/dev/null || true
+    echo "  gp2 set as default storage class."
+else
+    echo "  WARNING: gp2 storage class not found. Groundcover may fail to deploy."
+    echo "  Ensure a default storage class exists before continuing."
+fi
+
+# --- Step 3: Install Groundcover CLI -----------------------------------------
+echo ""
+echo "[3/7] Installing Groundcover CLI..."
+if ! command -v groundcover &>/dev/null; then
+    sh -c "$(curl -fsSL https://groundcover.com/install.sh)"
+    echo "  Groundcover CLI installed."
+else
+    echo "  Groundcover CLI already installed. Skipping."
+fi
+
+# --- Step 4: Deploy Groundcover eBPF sensor ----------------------------------
+echo ""
+echo "[4/7] Deploying Groundcover eBPF sensor..."
+if [ ! -f values.yaml ]; then
+    echo "  ERROR: values.yaml not found."
+    echo ""
+    echo "  Create one with your tenant endpoint:"
+    echo ""
+    echo '  cat > values.yaml << EOF'
+    echo '  global:'
+    echo '    backend:'
+    echo '      enabled: false'
+    echo '    ingress:'
+    echo '      site: <your-tenant-endpoint>'
+    echo '  EOF'
+    echo ""
+    echo "  Find your tenant endpoint in Groundcover under:"
+    echo "  Data Sources > Kubernetes Clusters > CLI installation"
+    exit 1
+fi
+groundcover deploy -f values.yaml
+echo "  Waiting for Groundcover pods..."
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/managed-by=groundcover -n groundcover --timeout=300s 2>/dev/null || true
+echo "  Groundcover deployed. Verify with: kubectl get pods -n groundcover"
+
+# --- Step 5: ECR + Docker Build ----------------------------------------------
+echo ""
+echo "[5/7] Building and pushing buggy-service image..."
 aws ecr describe-repositories --repository-names "${ECR_REPO}" --region "${REGION}" 2>/dev/null || \
     aws ecr create-repository --repository-name "${ECR_REPO}" --region "${REGION}"
 
-echo ""
-echo "[3/6] Building and pushing Docker image..."
 aws ecr get-login-password --region "${REGION}" | \
     docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
@@ -61,9 +113,9 @@ docker tag "${ECR_REPO}:${IMAGE_TAG}" "${FULL_IMAGE}"
 docker push "${FULL_IMAGE}"
 cd ..
 
-# --- Phase 2c: Deploy to K8s ------------------------------------------------
+# --- Step 6: Deploy to K8s ---------------------------------------------------
 echo ""
-echo "[4/6] Deploying to Kubernetes..."
+echo "[6/7] Deploying order-service..."
 kubectl apply -f k8s/namespace.yaml
 
 # Substitute the image placeholder
@@ -72,17 +124,9 @@ sed "s|ORDER_SERVICE_IMAGE|${FULL_IMAGE}|g" k8s/order-service.yaml | kubectl app
 echo "  Waiting for rollout..."
 kubectl -n slo-demo rollout status deployment/order-service --timeout=120s
 
-# --- Phase 2d: Install Groundcover ------------------------------------------
+# --- Step 7: Run Load Generator ----------------------------------------------
 echo ""
-echo "[5/6] Installing Groundcover..."
-echo "  If not already installed, run:"
-echo "    curl -fsSL https://app.groundcover.com/install | bash"
-echo "  Then verify with: kubectl get pods -n groundcover"
-echo ""
-
-# --- Phase 2e: Run Load Generator -------------------------------------------
-echo ""
-echo "[6/6] Starting load generator..."
+echo "[7/7] Starting load generator..."
 echo "  Port-forwarding order-service to localhost:8000..."
 kubectl -n slo-demo port-forward svc/order-service 8000:80 &
 PF_PID=$!
@@ -95,7 +139,8 @@ kill $PF_PID 2>/dev/null || true
 
 echo ""
 echo "============================================"
-echo "  Load generation complete."
+echo "  Deployment complete!"
+echo ""
 echo "  Check Groundcover for SLO breach signals."
 echo "  Then run Claude Code from this directory:"
 echo "    claude"

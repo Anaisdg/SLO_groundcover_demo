@@ -46,19 +46,32 @@ The workflow is defined in [`CLAUDE.md`](CLAUDE.md) — Claude Code follows it a
 │   └── load_gen.py
 ├── deploy.sh                   # EKS deployment script
 ├── CLAUDE.md                   # Agent workflow instructions
-├── .claude/                    # Claude Code config
-│   └── settings.json.example   # OTEL telemetry config template
 ├── .env.example                # Environment variable template
+├── values.yaml.example         # Groundcover deploy config template
 └── README.md
 ```
 
 ## Prerequisites
 
-- AWS CLI configured (`eksctl`, `kubectl`, Docker)
+### To deploy the buggy service (optional)
+
+- AWS CLI configured with permissions for EKS and ECR
+- `eksctl`
+- Docker
+- Python 3 (for the load generator)
+
+> **Note:** You don't need to deploy the demo service. If you already have a Groundcover cluster with data, the agent can query it directly — just update the namespace and workload names in [`CLAUDE.md`](CLAUDE.md).
+
+### To install observability
+
+- A [Groundcover](https://groundcover.com) account
+- Install the Groundcover eBPF sensor on your EKS cluster
+
+### To run Claude Code as the agent
+
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
-- Groundcover account with MCP access
-- Linear workspace with a Marketing team and "SLO Demo" project
-- Linear API key with full permissions (https://linear.app/settings/api)
+- [Groundcover MCP](https://mcp.groundcover.com) connected to Claude Code
+- [Linear MCP](https://linear.app) connected to Claude Code
 
 ## Quick Start
 
@@ -68,28 +81,34 @@ The workflow is defined in [`CLAUDE.md`](CLAUDE.md) — Claude Code follows it a
 # MCP credentials and deployment config
 cp .env.example .env
 # Fill in your Groundcover and Linear API keys
-
-# Claude Code OTEL telemetry (optional — sends traces to Groundcover)
-cp .claude/settings.json.example .claude/settings.json
-# Fill in your OTEL endpoint and auth header
 ```
 
-### 2. Deploy the buggy service to EKS
+### 2. Create a `values.yaml` for Groundcover
+
+```bash
+cp values.yaml.example values.yaml
+# Fill in your tenant endpoint (find it in Groundcover under
+# Data Sources > Kubernetes Clusters > CLI installation)
+```
+
+### 3. Deploy everything
 
 ```bash
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-This creates an EKS cluster, deploys `order-service`, installs Groundcover, and runs load generation.
+The script handles the full setup:
 
-### 3. Generate traffic
-
-```bash
-# Port-forward and run load
-kubectl -n slo-demo port-forward svc/order-service 8000:80 &
-python3 load-gen/load_gen.py http://localhost:8000 --rps 2 --duration 120
-```
+| Step | What it does |
+|------|-------------|
+| 1/7 | Creates an EKS cluster (2x `t3.xlarge` nodes), or skips if it exists |
+| 2/7 | Sets `gp2` as the default storage class (required by Groundcover) |
+| 3/7 | Installs the Groundcover CLI |
+| 4/7 | Deploys the Groundcover eBPF sensor using your `values.yaml` |
+| 5/7 | Builds the buggy `order-service` Docker image and pushes to ECR |
+| 6/7 | Deploys `order-service` (2 replicas) to the `slo-demo` namespace |
+| 7/7 | Port-forwards and runs the load generator (2 RPS for 2 minutes) |
 
 ~70% of multi-item orders will breach the 500ms SLO.
 

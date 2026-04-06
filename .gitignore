@@ -30,5 +30,6 @@ Thumbs.db
 # Kubernetes secrets (never commit)
 *-secrets.yaml
 
-# Helm
+# Groundcover deploy config (contains tenant endpoint)
 values.yaml
+!values.yaml.example

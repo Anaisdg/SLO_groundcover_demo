@@ -1,0 +1,5 @@
+global:
+  backend:
+    enabled: false
+  ingress:
+    site: <your-tenant-endpoint>
