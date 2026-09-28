@@ -1,9 +1,9 @@
 """
-Buggy Order Service — intentionally slow endpoint for SLO breach demo.
+Order Service — Fast API service with optimized batch processing.
 
-The POST /orders endpoint has a simulated N+1 query pattern:
-for each item in an order, it does a sequential "database lookup" (time.sleep).
-This causes p99 latency to blow past the 500ms SLO target.
+The POST /orders endpoint uses batched inventory lookups to maintain
+sub-linear performance scaling with order size, keeping p99 latency
+well under the 500ms SLO target.
 """
 
 import time
@@ -38,25 +38,29 @@ class OrderResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# The Bug: N+1 sequential "DB queries" per item
+# Fixed: Batched DB queries
 # ---------------------------------------------------------------------------
-def _simulate_db_lookup(sku: str, *, multi_line_order: bool) -> dict:
-    """Simulates a DB round-trip per line item; multi-line orders stack cost (N+1 demo)."""
-    if multi_line_order:
-        delay = random.uniform(0.12, 0.22)
-    else:
-        # Single-line cart: keep total work clearly under typical 500ms SLO.
-        delay = random.uniform(0.04, 0.10)
+def _simulate_batched_db_lookup(skus: list[str]) -> dict[str, dict]:
+    """Simulates a batched DB lookup for multiple SKUs in a single query."""
+    # Simulate a single batched DB call - latency doesn't scale with item count
+    delay = random.uniform(0.08, 0.15)  # Single query time regardless of SKU count
     time.sleep(delay)
-    return {"sku": sku, "price": round(random.uniform(9.99, 99.99), 2), "in_stock": True}
+    
+    # Return results for all SKUs in one operation
+    results = {}
+    for sku in skus:
+        results[sku] = {
+            "sku": sku, 
+            "price": round(random.uniform(9.99, 99.99), 2), 
+            "in_stock": True
+        }
+    return results
 
 
-def _simulate_payment_validation(customer_id: str, *, multi_line_order: bool) -> bool:
+def _simulate_payment_validation(customer_id: str) -> bool:
     """Simulates a payment gateway call."""
-    if multi_line_order:
-        time.sleep(random.uniform(0.05, 0.12))
-    else:
-        time.sleep(random.uniform(0.02, 0.06))
+    # Payment validation time doesn't depend on order size
+    time.sleep(random.uniform(0.02, 0.08))
     return True
 
 
@@ -76,20 +80,19 @@ def ready():
 @app.post("/orders", response_model=OrderResponse)
 def create_order(order: OrderRequest):
     """
-    Create an order. This is intentionally buggy:
-    - Each item triggers a sequential DB lookup (N+1 pattern)
-    - Payment validation adds another blocking call
-    - With 2+ line items, sequential per-item work exceeds the 500ms SLO; single-line stays under
+    Create an order with batched inventory lookups for optimal performance.
+    - All SKU lookups are batched into a single DB query
+    - Payment validation is independent of order size
+    - Performance now scales sub-linearly with item count, staying well under 500ms SLO
     """
     start = time.monotonic()
-    multi_line_order = len(order.items) >= 2
 
-    # N+1: sequential lookup for EACH line item (the bug shows up once count >= 2)
-    for item in order.items:
-        _simulate_db_lookup(item.sku, multi_line_order=multi_line_order)
-        _simulate_db_lookup(item.sku, multi_line_order=multi_line_order)
+    # Batched lookup: single query for ALL SKUs in the order
+    skus = [item.sku for item in order.items]
+    inventory_results = _simulate_batched_db_lookup(skus)
 
-    _simulate_payment_validation(order.customer_id, multi_line_order=multi_line_order)
+    # Single payment validation call
+    _simulate_payment_validation(order.customer_id)
 
     elapsed_ms = (time.monotonic() - start) * 1000
 
